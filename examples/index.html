@@ -1,425 +1,986 @@
 <!DOCTYPE html>
 <html lang="en">
 	<head>
+		<title>SmartHome</title>
 		<meta charset="utf-8">
-		<title>three.js examples</title>
 		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
-		<link rel="shortcut icon" href="../files/favicon_white.ico" media="(prefers-color-scheme: dark)"/>
-		<link rel="shortcut icon" href="../files/favicon.ico" media="(prefers-color-scheme: light)" />
-		<link rel="stylesheet" type="text/css" href="../files/main.css">
+		<link type="text/css" rel="stylesheet" href="main.css">
+		<style>
+			.button-start-garage{
+				display:absolute;
+				width: 100px;
+				height: 100px;
+			}
+		</style>
 	</head>
 	<body>
 
-		<div id="panel">
-
-			<div id="header">
-				<h1><a href="https://threejs.org">three.js</a></h1>
-
-				<div id="sections">
-					<a href="../docs/index.html#manual/introduction/Creating-a-scene">docs</a>
-					<span class="selected">examples</span>
-				</div>
-
-				<div id="expandButton"></div>
-			</div>
-
-			<div id="panelScrim"></div>
-
-			<div id="contentWrapper">
-
-				<div id="inputWrapper">
-					<input placeholder="" type="text" id="filterInput" autocorrect="off" autocapitalize="off" spellcheck="false" />
-					<div id="exitSearchButton"></div>
-				</div>
-
-				<div id="content">
-					<img id="previewsToggler" src="./files/thumbnails.svg" width="20" height="20" />
-				</div>
-			</div>
-
+		<div id="container"></div>
+		<div class="button-start-garage">
+			<button id="liga-garagem">Ligar</button>
+			<button id="desliga-garagem">Ligar</button>
+		</div>
+		<div id="info">
+			<a href="https://threejs.org" target="_blank" rel="noopener">three.js</a>
 		</div>
 
-		<iframe id="viewer" name="viewer" allow="fullscreen; xr-spatial-tracking;"></iframe>
+		<!-- Import maps polyfill -->
+		<!-- Remove this when import maps will be widely supported -->
+		<script async src="https://unpkg.com/es-module-shims@1.3.6/dist/es-module-shims.js"></script>
+		<script src="https://unpkg.com/mqtt@4.0.1/dist/mqtt.js" type="module"></script>
 
-		<a id="button" target="_blank"><img src="../files/ic_code_black_24dp.svg"></a>
+		<script type="importmap">
+			{
+				"imports": {
+					"three": "../build/three.module.js"
+				}
+			}
+		</script>
 
-		<script>
+		<script type="module">
 
-		const panel = document.getElementById( 'panel' );
-		const content = document.getElementById( 'content' );
-		const viewer = document.getElementById( 'viewer' );
-		const filterInput = document.getElementById( 'filterInput' );
-		const exitSearchButton = document.getElementById( 'exitSearchButton' );
-		const expandButton = document.getElementById( 'expandButton' );
-		const viewSrcButton = document.getElementById( 'button' );
-		const panelScrim = document.getElementById( 'panelScrim' );
-		const previewsToggler = document.getElementById( 'previewsToggler' );
+			import * as THREE from 'three';
 
-		const sectionLink = document.querySelector( '#sections > a' );
-		const sectionDefaultHref = sectionLink.href;
+			import { GUI } from './jsm/libs/lil-gui.module.min.js';
 
-		const links = {};
-		const validRedirects = new Map();
-		const container = document.createElement( 'div' );
+			import { OrbitControls } from './jsm/controls/OrbitControls.js';
 
-		let selected = null;
+			import { GLTFLoader } from './jsm/loaders/GLTFLoader.js'
 
-		init();
+			import { OBJLoader } from './jsm/loaders/OBJLoader.js'
 
-		async function init() {
+			import { MTLLoader } from './jsm/loaders/MTLLoader.js'
 
-			content.appendChild( container );
+			import { RGBELoader } from './jsm/loaders/RGBELoader.js'
 
-			viewSrcButton.style.display = 'none';
+			let camera, scene, renderer, lampadaQuart1, lampadaQuart2, lampadaCozinha, lampadaBanheiro, lampadaSala, lampadaRua, bulbMat, bulbMat2, bulbMat3, bulbMat4, bulbMat5, bulbMat6, hemiLight;
+			let ballMat, cubeMat, floorMat;
+            let textura,materialParede,materialPiso, geometriaParede, geometriaPiso;
+			let valueLamp1 = 0, valueLamp2 = 0, valueLampSala = 0, valueLampBanheiro = 0, valueLampCozinha = 0, valueLampRua = 0;
+			let rotaçãoGaragem = 0, posicaoPortaGaragem;
+			let luzAmbiente = 1;
 
-			const files = await ( await fetch( 'files.json' ) ).json();
-			const tags = await ( await fetch( 'tags.json' ) ).json();
+			let previousShadowMap = false;
 
-			for ( const key in files ) {
+			
 
-				const category = files[ key ];
+			// ref for lumens: http://www.power-sure.com/lumens.htm
+			const bulbLuminousPowers = {
+				"110000 lm (1000W)": 110000,
+				"3500 lm (300W)": 3500,
+				"1700 lm (100W)": 1700,
+				"800 lm (60W)": 800,
+				"400 lm (40W)": 400,
+				"180 lm (25W)": 180,
+				"20 lm (4W)": 20,
+				"Off": 0
+			};
 
-				const header = document.createElement( 'h2' );
-				header.textContent = key;
-				header.setAttribute( 'data-category', key );
-				container.appendChild( header );
+			// ref for solar irradiances: https://en.wikipedia.org/wiki/Lux
+			const hemiLuminousIrradiances = {
+				"0.0001 lx (Moonless Night)": 0.0001,
+				"0.002 lx (Night Airglow)": 0.002,
+				"0.5 lx (Full Moon)": 0.5,
+				"3.4 lx (City Twilight)": 3.4,
+				"50 lx (Living Room)": 50,
+				"100 lx (Very Overcast)": 100,
+				"350 lx (Office Room)": 350,
+				"400 lx (Sunrise/Sunset)": 400,
+				"1000 lx (Overcast)": 1000,
+				"18000 lx (Daylight)": 18000,
+				"50000 lx (Direct Sun)": 50000
+			};
 
-				for ( let i = 0; i < category.length; i ++ ) {
+			const params = {
+				shadows: true,
+				exposure: 0.68,
+				bulbPower: Object.keys( bulbLuminousPowers )[ 2 ],
+				hemiIrradiance: Object.keys( hemiLuminousIrradiances )[ 2 ]
+			};
 
-					const file = category[ i ];
+			init();
+			animate();
 
-					const link = createLink( file, tags[ file ] );
-					container.appendChild( link );
+			function init() {
 
-					links[ file ] = link;
-					validRedirects.set( file, file + '.html' );
+				const container = document.getElementById( 'container' );
+
+				camera = new THREE.PerspectiveCamera( 50, window.innerWidth / window.innerHeight, 0.1, 100 );
+				camera.position.x = 17;
+				camera.position.z = 0;
+				camera.position.y = 10;
+
+				scene = new THREE.Scene();
+				scene.background = new THREE.Color( 0x8cc7de );
+
+				const bulbGeometry = new THREE.SphereGeometry( 0.09, 16, 8 );
+				const bulbGeometry1 = new THREE.SphereGeometry( 0.13, 16, 8 );
+
+				bulbMat = new THREE.MeshStandardMaterial( {
+					emissive: 0xffffee,
+					emissiveIntensity: 1,
+					color: 0x000000
+				} );
+				bulbMat2 = new THREE.MeshStandardMaterial( {
+					emissive: 0xffffee,
+					emissiveIntensity: 1,
+					color: 0x000000
+				} );
+				bulbMat3 = new THREE.MeshStandardMaterial( {
+					emissive: 0xffffee,
+					emissiveIntensity: 1,
+					color: 0x000000
+				} );
+				bulbMat4 = new THREE.MeshStandardMaterial( {
+					emissive: 0xffffee,
+					emissiveIntensity: 1,
+					color: 0x000000
+				} );
+				bulbMat5 = new THREE.MeshStandardMaterial( {
+					emissive: 0xffffee,
+					emissiveIntensity: 1,
+					color: 0x000000
+				} );
+				bulbMat6 = new THREE.MeshStandardMaterial( {
+					emissive: 0xffffee,
+					emissiveIntensity: 1,
+					color: 0x000000
+				} );
+
+
+
+
+
+
+
+
+
+				/*---------------------------- Lampadas ---------------------------------- */
+				lampadaQuart1 = new THREE.PointLight( 0xffee88, 1, 100, 2 );
+				lampadaQuart1.add( new THREE.Mesh( bulbGeometry, bulbMat ) );
+				lampadaQuart1.position.set( 0, 2, 0 );
+				lampadaQuart1.castShadow = true;
+				scene.add( lampadaQuart1 );
+
+				lampadaQuart2 = new THREE.PointLight( 0xffee88, 1, 100, 2 );
+				lampadaQuart2.add( new THREE.Mesh( bulbGeometry, bulbMat2 ) );
+				lampadaQuart2.position.set( 0, 2, 0 );
+				lampadaQuart2.castShadow = true;
+				scene.add( lampadaQuart2 );
+
+				lampadaSala = new THREE.PointLight( 0xffee88, 1, 100, 2 );
+				lampadaSala.add( new THREE.Mesh( bulbGeometry, bulbMat3 ) );
+				lampadaSala.position.set( 0, 2, 0 );
+				lampadaSala.castShadow = true;
+				scene.add( lampadaSala );
+
+				lampadaBanheiro = new THREE.PointLight( 0xffee88, 1, 100, 2 );
+				lampadaBanheiro.add( new THREE.Mesh( bulbGeometry, bulbMat4 ) );
+				lampadaBanheiro.position.set( 0, 2, 0 );
+				lampadaBanheiro.castShadow = true;
+				scene.add( lampadaBanheiro );
+
+				lampadaCozinha = new THREE.PointLight( 0xffee88, 1, 100, 2 );
+				lampadaCozinha.add( new THREE.Mesh( bulbGeometry, bulbMat5 ) );
+				lampadaCozinha.position.set( 0, 2, 0 );
+				lampadaCozinha.castShadow = true;
+				scene.add( lampadaCozinha );
+
+				lampadaRua = new THREE.PointLight( 0xffee88, 1, 100, 2 );
+				lampadaRua.add( new THREE.Mesh( bulbGeometry1, bulbMat6 ) );
+				lampadaRua.position.set( 0, 2, 0 );
+				lampadaRua.castShadow = true;
+				scene.add( lampadaRua );
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+				hemiLight = new THREE.HemisphereLight( 0xddeeff, 0x0f0e0d, 0.02 );
+				scene.add( hemiLight );
+                
+                
+
+
+
+				floorMat = new THREE.MeshStandardMaterial( {
+					roughness: 0.8,
+					color: 0xffffff,
+					metalness: 0.2,
+					bumpScale: 0.0005
+				} );
+				const textureLoader = new THREE.TextureLoader();
+				textureLoader.load( "textures/terrain/grasslight-big.jpg", function ( map ) {
+
+					map.wrapS = THREE.RepeatWrapping;
+					map.wrapT = THREE.RepeatWrapping;
+					map.anisotropy = 4;
+					map.repeat.set( 10, 24 );
+					map.encoding = THREE.sRGBEncoding;
+					floorMat.map = map;
+					floorMat.needsUpdate = true;
+
+				} );
+				/* textureLoader.load( "textures/terrain/grasslight-big-nm.jpg", function ( map ) {
+
+					map.wrapS = THREE.RepeatWrapping;
+					map.wrapT = THREE.RepeatWrapping;
+					map.anisotropy = 4;
+					map.repeat.set( 10, 24 );
+					floorMat.bumpMap = map;
+					floorMat.needsUpdate = true;
+
+				} ); */
+				textureLoader.load( "textures/terrain/grasslight-big-nm.jpg", function ( map ) {
+
+					map.wrapS = THREE.RepeatWrapping;
+					map.wrapT = THREE.RepeatWrapping;
+					map.anisotropy = 4;
+					map.repeat.set( 10, 24 );
+					floorMat.roughnessMap = map;
+					floorMat.needsUpdate = true;
+
+				} );
+
+				cubeMat = new THREE.MeshStandardMaterial( {
+					roughness: 0.7,
+					color: 0xffffff,
+					bumpScale: 0.002,
+					metalness: 0.2
+				} );
+				textureLoader.load( "textures/porta_madeira.jpg", function ( map ) {
+
+					map.wrapS = THREE.RepeatWrapping;
+					map.wrapT = THREE.RepeatWrapping;
+					map.anisotropy = 4;
+					map.repeat.set( 1, 1 );
+					map.encoding = THREE.sRGBEncoding;
+					cubeMat.map = map;
+					cubeMat.needsUpdate = true;
+
+				} );
+
+
+
+
+
+				
+				
+				// (espessura, altura, estender, posicaoX, posicaoY, posicaoZ, espessura, altura, estender, rotaçãoZ, rotaçãoX, rotaçãoY)
+				/* Frente da casa */
+                criaParede(0.01, 1.1, 13.2, 8.42, 0.5, -0.45, 1, 1, 1, 0, 0, 0, cubeMat);
+				/* Atrás da casa */
+                criaParede(0.1, 1.0, 13.2, -6.3, 0.5, -0.45, 1, 1, 1, 0, 0, 0, cubeMat);
+				/* Direita */
+                criaParede(0.1, 1.1, 14.5, 0.99, 0.5, 6.1, 1, 1, 1, 0, 1.574, 0, cubeMat);
+				/* Esquerda */
+                criaParede(0.1, 1.1, 14.5, 0.99, 0.5, -7, 1, 1, 1, 0, 1.57, 0, cubeMat);
+				
+				
+				
+				/* Porta garagem */
+				const time = Date.now() * 0.0005;
+                criaParede(0.11, 2.68, 6.4, 6, 1.3, -13, 1, 1, 1, 0, 0, 0, cubeMat);
+				posicaoPortaGaragem = scene.children[11].position.y
+
+				console.log(scene.children[11].rotation.x);
+				
+
+				ballMat = new THREE.MeshStandardMaterial( {
+					color: 0xffffff,
+					roughness: 0.5,
+					metalness: 1.0
+				} );
+				textureLoader.load( "textures/planets/earth_atmos_2048.jpg", function ( map ) {
+
+					map.anisotropy = 4;
+					map.encoding = THREE.sRGBEncoding;
+					ballMat.map = map;
+					ballMat.needsUpdate = true;
+
+				} );
+				textureLoader.load( "textures/planets/earth_specular_2048.jpg", function ( map ) {
+
+					map.anisotropy = 4;
+					map.encoding = THREE.sRGBEncoding;
+					ballMat.metalnessMap = map;
+					ballMat.needsUpdate = true;
+
+				} );
+
+				const floorGeometry = new THREE.PlaneGeometry( 50, 50 );
+				const floorMesh = new THREE.Mesh( floorGeometry, floorMat );
+				floorMesh.receiveShadow = true;
+				floorMesh.rotation.x = - Math.PI / 2.0;
+				scene.add( floorMesh );
+
+				const boxGeometry = new THREE.BoxGeometry( 0.5, 0.5, 0.5 );
+				console.log(/* 'Cena = ' +  */scene);
+
+				/* Insere objeto da casa */
+				var mtlHome = new MTLLoader();
+				mtlHome.setPath('./models/basic_home/');
+				mtlHome.load('export.mtl', function(materials){
+					materials.preload();
+
+					// instantiate a loaderHome
+					var loaderHome = new OBJLoader();
+					loaderHome.setMaterials(materials);
+					loaderHome.setPath('./models/basic_home/');
+					// load a resource
+					loaderHome.load(
+						// resource URL
+						'export.obj',
+						// called when resource is loaded
+						function ( object ) {
+							object.position.y = 0.01;
+							object.position.x = 0;
+							object.position.z = 6;
+							object.scale.setScalar(1);
+							scene.add( object );
+
+						}
+					);
+
+				});
+
+				/* Insere objeto da garagem */
+				const loader = new GLTFLoader().setPath( './models/garage/' );
+				loader.load( 'scene.gltf', function ( gltf ) {
+					gltf.scene.scale.set(0.028, 0.028, 0.028);
+					gltf.scene.position.z = -13;
+					gltf.scene.position.x = 2;
+					gltf.scene.rotation.y = 1.57;
+					scene.add( gltf.scene );
+
+					render();
+
+				} );
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+				/* -------------------- Objetos de lampadas --------------------------- */
+
+				/* Insere objeto lampada 1 */
+				var mtlLamp1 = new MTLLoader();
+				mtlLamp1.setPath('./models/lampada2/');
+				mtlLamp1.load('sconce_02.mtl', function(materials){
+					materials.preload();
+
+					// instantiate a loaderLamp1
+					var loaderLamp1 = new OBJLoader();
+					loaderLamp1.setMaterials(materials);
+					loaderLamp1.setPath('./models/lampada2/');
+					// load a resource
+					loaderLamp1.load(
+						// resource URL
+						'sconce_02.obj',
+						// called when resource is loaded
+						function ( object ) {
+							object.position.set(-3.53, 2.3, .26);
+							object.scale.setScalar(2);
+							scene.add( object );
+						}
+					);
+				})
+
+				var mtlLamp2 = new MTLLoader();
+				mtlLamp2.setPath('./models/lampada2/');
+				mtlLamp2.load('sconce_02.mtl', function(materials){
+					materials.preload();
+
+					// instantiate a loaderLamp2
+					var loaderLamp2 = new OBJLoader();
+					loaderLamp2.setMaterials(materials);
+					loaderLamp2.setPath('./models/lampada2/');
+					// load a resource
+					loaderLamp2.load(
+						// resource URL
+						'sconce_02.obj',
+						// called when resource is loaded
+						function ( object ) {
+							object.position.set(-4.75, 2.3, -6.865);
+							object.scale.setScalar(2);
+							scene.add( object );
+						}
+					);
+				});
+
+				const lampSala = new GLTFLoader().setPath( './models/lamp/' );
+				lampSala.load( 'scene.gltf', function ( gltf ) {
+					gltf.scene.scale.set(.5, .5, .5);
+					gltf.scene.position.z = -4.5;
+					gltf.scene.position.x = 3.5;
+					gltf.scene.position.y = 2.7;
+					scene.add( gltf.scene );
+
+					render();
+
+				} );
+
+				var mtlLampBanheiro = new MTLLoader();
+				mtlLampBanheiro.setPath('./models/lampada2/');
+				mtlLampBanheiro.load('sconce_02.mtl', function(materials){
+					materials.preload();
+
+					// instantiate a loaderLampBanheiro
+					var loaderLampBanheiro = new OBJLoader();
+					loaderLampBanheiro.setMaterials(materials);
+					loaderLampBanheiro.setPath('./models/lampada2/');
+					// load a resource
+					loaderLampBanheiro.load(
+						// resource URL
+						'sconce_02.obj',
+						// called when resource is loaded
+						function ( object ) {
+							object.rotation.y = 3.1;
+							object.position.set(-2.2, 2.3, -3.68);
+							object.scale.setScalar(2);
+							scene.add( object );
+						}
+					);
+				});
+
+				const lampCozinha = new GLTFLoader().setPath( './models/lamp/' );
+				lampCozinha.load( 'scene.gltf', function ( gltf ) {
+					gltf.scene.scale.set(.5, .5, .5);
+					gltf.scene.position.z = 4;
+					gltf.scene.position.x = 4;
+					gltf.scene.position.y = 2.7;
+					scene.add( gltf.scene );
+
+					render();
+
+				} );
+
+				const lampRua = new GLTFLoader().setPath( './models/street_lamp/' );
+				lampRua.load( 'scene.gltf', function ( gltf ) {
+					gltf.scene.scale.set(.1, .1, .1);
+					gltf.scene.position.z = -8;
+					gltf.scene.position.x = 8.5;
+					gltf.scene.position.y = 0;
+					gltf.scene.rotation.y = 3.15;
+					scene.add( gltf.scene );
+
+					render();
+
+				} );
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+				renderer = new THREE.WebGLRenderer();
+				renderer.physicallyCorrectLights = true;
+				renderer.outputEncoding = THREE.sRGBEncoding;
+				renderer.shadowMap.enabled = false;
+				renderer.toneMapping = THREE.ReinhardToneMapping;
+				renderer.setPixelRatio( window.devicePixelRatio );
+				renderer.setSize( window.innerWidth, window.innerHeight );
+				container.appendChild( renderer.domElement );
+
+
+				const controls = new OrbitControls( camera, renderer.domElement );
+				//controls.minDistance = 1;
+				//controls.maxDistance = 20;
+
+				window.addEventListener( 'resize', onWindowResize );
+
+
+				const gui = new GUI();
+
+				gui.add( params, 'hemiIrradiance', Object.keys( hemiLuminousIrradiances ) );
+				gui.add( params, 'bulbPower', Object.keys( bulbLuminousPowers ) );
+				gui.add( params, 'exposure', 0, 1 );
+				gui.add( params, 'shadows' );
+				gui.open();
+
+			}
+
+			function onWindowResize() {
+
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+
+				renderer.setSize( window.innerWidth, window.innerHeight );
+
+			}
+
+			//
+            function criaPiso(tx, ty, tz, px, py, pz, ex, ey, ez, rx, ry, rz){
+                textura = new THREE.TextureLoader().load('textures/257561-7.webp');
+                //textura = new THREE.TextureLoader().load('textures/D_NQ_NP_830971-MLB48759526714_012022-O.webp');
+				textura.anisotropy = 4;
+
+				materialPiso = new THREE.MeshBasicMaterial( { map: textura } );
+                geometriaPiso = new THREE.BoxGeometry( tx, ty, tz );
+                criaObjeto( geometriaPiso, materialPiso,px,py,pz,ex,ey,ez,rx,ry,rz);
+            }
+
+            function criaParede(tx, ty, tz, px, py, pz, ex, ey, ez, rx, ry, rz,Materialx){
+
+                textura = new THREE.TextureLoader().load( 'textures/porta_madeira.jpg' );
+                   
+                textura.roughness = 0.7
+                textura.color = 0xffffff,
+                textura.bumpScale = 0.002;
+                textura.metalness = 0.2;
+				textura.anisotropy = 4;
+
+				//materialParede = new THREE.MeshBasicMaterial( { map: textura } );
+				materialParede = Materialx;
+                geometriaParede = new THREE.BoxGeometry( tx, ty, tz );
+                criaObjeto( geometriaParede, materialParede,px,py,pz,ex,ey,ez,rx,ry,rz);
+
+            }
+
+			function criaPorta(tx, ty, tz, Materialx){
+
+				textura = new THREE.TextureLoader().load( 'textures/porta_madeira.jpg' );
+				
+				textura.roughness = 0.7
+				textura.color = 0xffffff,
+				textura.bumpScale = 0.002;
+				textura.metalness = 0.2;
+				textura.anisotropy = 4;
+
+				//materialParede = new THREE.MeshBasicMaterial( { map: textura } );
+				materialParede = Materialx;
+				geometriaParede = new THREE.BoxGeometry( tx, ty, tz );
+				criaObjeto( geometriaParede, materialParede,px,py,pz,ex,ey,ez,rx,ry,rz);
+
+			}
+            
+            
+			// Função para criar  o objeto na sena
+			function criaObjeto( geometria, material, px, py, pz, ex,ey,ez, rx,ry,rz ) {
+
+                    let mesh = new THREE.Mesh( geometria, material );
+                    
+                    mesh.castShadow = true;
+
+                    mesh.position.x = px;
+                    mesh.position.y = py;
+                    mesh.position.z = pz;
+
+                    mesh.scale.x = ex;
+                    mesh.scale.y = ey;
+                    mesh.scale.z = ez;
+
+                    mesh.rotation.x += rx;
+                    mesh.rotation.y += ry;
+                    mesh.rotation.z += rz;
+
+                    scene.add( mesh );
+
+            }
+
+			// Função para criar  o objeto na sena
+			function criaObjPorta( geometria, material) {
+
+				let mesh = new THREE.Mesh( geometria, material );
+
+				mesh.castShadow = true;
+
+				mesh.position.x = px;
+				mesh.position.y = py;
+				mesh.position.z = pz;
+
+				mesh.scale.x = ex;
+				mesh.scale.y = ey;
+				mesh.scale.z = ez;
+
+				mesh.rotation.x += rx;
+				mesh.rotation.y += ry;
+				mesh.rotation.z += rz;
+
+				scene.add( mesh );
+
+			}
+
+
+			function animate() {
+
+				requestAnimationFrame( animate );
+
+				render();
+
+			}
+
+			function render() {
+
+				renderer.toneMappingExposure = Math.pow( params.exposure, 5.0 ); // to allow for very bright scenes.
+				renderer.shadowMap.enabled = params.shadows;
+				lampadaQuart1.castShadow = params.shadows;
+				lampadaQuart2.castShadow = params.shadows;
+				lampadaBanheiro.castShadow = params.shadows;
+				lampadaCozinha.castShadow = params.shadows;
+				lampadaSala.castShadow = params.shadows;
+
+				if ( params.shadows !== previousShadowMap ) {
+
+					ballMat.needsUpdate = true;
+					cubeMat.needsUpdate = true;
+					floorMat.needsUpdate = true;
+					previousShadowMap = params.shadows;
 
 				}
 
-			}
+				lampadaQuart1.power = valueLamp1;
+				bulbMat.emissiveIntensity = lampadaQuart1.intensity / Math.pow( 0.02, 2.0 ); // convert from intensity to irradiance at bulb surface
 
-			if ( window.location.hash !== '' ) {
+				lampadaQuart2.power = valueLamp2;
+				bulbMat2.emissiveIntensity = lampadaQuart2.intensity / Math.pow( 0.02, 2.0 ); // convert from intensity to irradiance at bulb surface
 
-				const file = window.location.hash.substring( 1 );
+				lampadaBanheiro.power = valueLampBanheiro;
+				bulbMat4.emissiveIntensity = lampadaBanheiro.intensity / Math.pow( 0.02, 2.0 ); // convert from intensity to irradiance at bulb surface
 
-				// use a predefined map of redirects to avoid untrusted URL redirection due to user-provided value
+				lampadaCozinha.power = valueLampCozinha;
+				bulbMat5.emissiveIntensity = lampadaCozinha.intensity / Math.pow( 0.02, 2.0 ); // convert from intensity to irradiance at bulb surface
 
-				if ( validRedirects.has( file ) === true ) {
+				lampadaSala.power = valueLampSala;
+				bulbMat3.emissiveIntensity = lampadaSala.intensity / Math.pow( 0.02, 2.0 ); // convert from intensity to irradiance at bulb surface
 
-					selectFile( file );
-					viewer.src = validRedirects.get( file );
-					viewer.style.display = 'unset';
+				lampadaRua.power = valueLampRua;
+				bulbMat6.emissiveIntensity = lampadaRua.intensity / Math.pow( 0.02, 2.0 ); // convert from intensity to irradiance at bulb surface
 
-				}
+				hemiLight.intensity = luzAmbiente;
+				//const time = Date.now() * 0.0005;
+				lampadaQuart1.position.set(-3.53, 2.5, .36);
+				lampadaQuart2.position.set(-4.75, 2.5, -6.765);
+				lampadaSala.position.set(3.5, 2.256, -4.5);
+				lampadaCozinha.position.set(4, 2.256, 4);
+				lampadaBanheiro.position.set(-2.2, 2.5, -3.777);
+				lampadaRua.position.set(8.92, 3.95, -8);
 
-			}
+				const time = Date.now() * 0.0005;
+				//console.log(time);
 
-			if ( viewer.src === '' ) {
+				scene.children[11].rotation.z = rotaçãoGaragem;
+				scene.children[11].position.y = posicaoPortaGaragem;
 
-				viewer.srcdoc = document.getElementById( 'PlaceholderHTML' ).innerHTML;
-				viewer.style.display = 'unset';
-
-			}
-
-			filterInput.value = extractQuery();
-
-			if ( filterInput.value !== '' ) {
-
-				panel.classList.add( 'searchFocused' );
-
-				updateFilter( files, tags );
-
-			} else {
-
-				updateLink( '' );
+				renderer.render( scene, camera );
 
 			}
 
-			// Events
 
-			filterInput.onfocus = function ( ) {
-
-				panel.classList.add( 'searchFocused' );
-
-			};
-
-			filterInput.onblur = function ( ) {
-
-				if ( filterInput.value === '' ) {
-
-					panel.classList.remove( 'searchFocused' );
-
-				}
-
-			};
-
-			exitSearchButton.onclick = function ( ) {
-
-				filterInput.value = '';
-				updateFilter( files, tags );
-				panel.classList.remove( 'searchFocused' );
-
-			};
-
-			filterInput.addEventListener( 'input', function () {
-
-				updateFilter( files, tags );
-
-			} );
-
-
-			expandButton.addEventListener( 'click', function ( event ) {
-
-				event.preventDefault();
-				panel.classList.toggle( 'open' );
-
-			} );
-
-			panelScrim.onclick = function ( event ) {
-
-				event.preventDefault();
-				panel.classList.toggle( 'open' );
-
-			};
-
-			previewsToggler.onclick = function ( event ) {
-
-				event.preventDefault();
-				content.classList.toggle( 'minimal' );
-
-			};
-
-			// iOS iframe auto-resize workaround
-
-			if ( /(iPad|iPhone|iPod)/g.test( navigator.userAgent ) ) {
-
-				viewer.style.width = getComputedStyle( viewer ).width;
-				viewer.style.height = getComputedStyle( viewer ).height;
-				viewer.setAttribute( 'scrolling', 'no' );
-
+			/* MQTT ------------------------------------------------------------------------------------------------------------- */
+			// connection option
+			const options = {
+					clean: true,
+					connectTimeout: 15000,
+					clientId: '654321',
+					username: '',
+					password: '',
+			}
+			const options2 = {
+					clean: true,
+					connectTimeout: 15000,
+					clientId: '4538763783',
+					username: '',
+					password: '',
+			}
+			const options3 = {
+					clean: true,
+					connectTimeout: 15000,
+					clientId: '5375375',
+					username: '',
+					password: '',
+			}
+			const options4 = {
+					clean: true,
+					connectTimeout: 15000,
+					clientId: '25725356',
+					username: '',
+					password: '',
+			}
+			const options5 = {
+					clean: true,
+					connectTimeout: 15000,
+					clientId: '2782782783',
+					username: '',
+					password: '',
+			}
+			const options6 = {
+					clean: true,
+					connectTimeout: 15000,
+					clientId: '27827827893',
+					username: '',
+					password: '',
+			}
+			const options7 = {
+					clean: true,
+					connectTimeout: 15000,
+					clientId: '321654987654',
+					username: '',
+					password: '',
+			}
+			const optPortGarage = {
+					clean: true,
+					connectTimeout: 15000,
+					clientId: '555666',
+					username: '',
+					password: '',
 			}
 
-		}
-
-		function createLink( file, tags ) {
-
-			const external = Array.isArray( tags ) && tags.includes( 'external' ) ? ' <span class="tag">external</span>' : '';
-
-			const template = `
-				<div class="card">
-					<a href="${ file }.html" target="viewer">
-						<div class="cover">
-							<img src="screenshots/${ file }.jpg" loading="lazy" width="400" />
-						</div>
-						<div class="title">${ getName( file ) }${ external }</div>
-					</a>
-				</div>
-			`;
-
-			const link = createElementFromHTML( template );
-
-			link.querySelector( 'a[target="viewer"]' ).addEventListener( 'click', function ( event ) {
-
-				if ( event.button !== 0 || event.ctrlKey || event.altKey || event.metaKey ) return;
-
-				selectFile( file );
-
-			} );
-
-			return link;
-
-		}
-
-		function selectFile( file ) {
-
-			if ( selected !== null ) links[ selected ].classList.remove( 'selected' );
-
-			links[ file ].classList.add( 'selected' );
-
-			window.location.hash = file;
-			viewer.focus();
-			viewer.style.display = 'unset';
-
-			panel.classList.remove( 'open' );
-
-			selected = file;
-
-			// Reveal "View source" button and set attributes to this example
-			viewSrcButton.style.display = '';
-			viewSrcButton.href = 'https://github.com/mrdoob/three.js/blob/master/examples/' + selected + '.html';
-			viewSrcButton.title = 'View source code for ' + getName( selected ) + ' on GitHub';
-
-		}
-
-		function escapeRegExp( string ) {
-
-			return string.replace( /[.*+?^${}()|[\]\\]/g, '\\$&' ); // https://stackoverflow.com/a/6969486/5250847
-
-		}
-
-		function updateFilter( files, tags ) {
-
-			let v = filterInput.value.trim();
-			v = v.replace( /\s+/gi, ' ' ); // replace multiple whitespaces with a single one
-
-			if ( v !== '' ) {
-
-				window.history.replaceState( {}, '', '?q=' + v + window.location.hash );
-
-			} else {
-
-				window.history.replaceState( {}, '', window.location.pathname + window.location.hash );
-
-			}
-
-			const exp = new RegExp( escapeRegExp( v ), 'gi' );
-
-			for ( const key in files ) {
-
-				const section = files[ key ];
-
-				for ( let i = 0; i < section.length; i ++ ) {
-
-					filterExample( section[ i ], exp, tags );
-
-				}
-
-			}
-
-			layoutList( files );
-
-			updateLink( v );
-
-		}
-
-		function updateLink( search ) {
-
-			// update docs link
-
-			if ( search ) {
-
-				const link = sectionLink.href.split( /[?#]/ )[ 0 ];
-				sectionLink.href = `${link}?q=${search}`;
-
-			} else {
-
-				sectionLink.href = sectionDefaultHref;
-
-			}
-
-		}
-
-		function filterExample( file, exp, tags ) {
-
-			const link = links[ file ];
-			if ( file in tags ) file += ' ' + tags[ file ].join( ' ' );
-			const res = file.match( exp );
-
-			if ( res && res.length > 0 ) {
-
-				link.classList.remove( 'hidden' );
-
-			} else {
-
-				link.classList.add( 'hidden' );
-
-			}
-
-		}
-
-		function getName( file ) {
-
-			const name = file.split( '_' );
-			name.shift();
-			return name.join( ' / ' );
-
-		}
-
-		function layoutList( files ) {
-
-			for ( const key in files ) {
-
-				let collapsed = true;
-
-				const section = files[ key ];
-
-				for ( let i = 0; i < section.length; i ++ ) {
-
-					const file = section[ i ];
-
-					if ( links[ file ].classList.contains( 'hidden' ) === false ) {
-
-						collapsed = false;
-						break;
-
-					}
-
-				}
-
-				const element = document.querySelector( 'h2[data-category="' + key + '"]' );
-
-				if ( collapsed ) {
-
-					element.classList.add( 'hidden' );
-
+			const connectUrl = 'mqtt://broker.mqttdashboard.com:8000/mqtt';
+
+			const lamp1 = mqtt.connect(connectUrl, options)
+			const lamp2 = mqtt.connect(connectUrl, options2)
+			const salaLamp = mqtt.connect(connectUrl, options3)
+			const cozinhaLamp = mqtt.connect(connectUrl, options4)
+			const banheiroLamp = mqtt.connect(connectUrl, options5)
+			const ruaLamp = mqtt.connect(connectUrl, options6)
+			const ambLuz = mqtt.connect(connectUrl, options7)
+			const portGarage = mqtt.connect(connectUrl, optPortGarage)
+
+			lamp1.on('connect', function () {
+					console.log('Connected')
+					lamp1.subscribe('my/testiculo/topic/lampadas/lamp1')
+			})
+			lamp1.on('error', (error) => {
+				console.log('Connection failed:', error)
+			})
+			lamp1.on('message', (topic, message) => {
+				console.log('receive message：', topic, message.toString());
+				if (message.toString() == 1) {
+					valueLamp1 = 800;
 				} else {
-
-					element.classList.remove( 'hidden' );
-
+					valueLamp1 = 0;
 				}
+			})
 
+			lamp2.on('connect', function () {
+				console.log('Connected')
+				lamp2.subscribe('my/testiculo/topic/lampadas/lamp2')
+			})
+			lamp2.on('error', (error) => {
+			console.log('Connection failed:', error)
+			})
+			lamp2.on('message', (topic, message) => {
+			console.log('receive message：', topic, message.toString());
+			if (message.toString() == 1) {
+				valueLamp2 = 800;
+			} else {
+				valueLamp2 = 0;
+			}
+			})
+
+			salaLamp.on('connect', function () {
+				console.log('Connected')
+				salaLamp.subscribe('my/testiculo/topic/lampadas/salaLamp')
+			})
+			salaLamp.on('error', (error) => {
+			console.log('Connection failed:', error)
+			})
+			salaLamp.on('message', (topic, message) => {
+			console.log('receive message：', topic, message.toString());
+			if (message.toString() == 1) {
+				valueLampSala = 800;
+			} else {
+				valueLampSala = 0;
+			}
+			})
+
+			cozinhaLamp.on('connect', function () {
+				console.log('Connected')
+				cozinhaLamp.subscribe('my/testiculo/topic/lampadas/cozinhaLamp')
+			})
+			cozinhaLamp.on('error', (error) => {
+			console.log('Connection failed:', error)
+			})
+			cozinhaLamp.on('message', (topic, message) => {
+			console.log('receive message：', topic, message.toString());
+			if (message.toString() == 1) {
+				valueLampCozinha = 800;
+			} else {
+				valueLampCozinha = 0;
+			}
+			})
+
+			banheiroLamp.on('connect', function () {
+				console.log('Connected')
+				banheiroLamp.subscribe('my/testiculo/topic/lampadas/banheiroLamp')
+			})
+			banheiroLamp.on('error', (error) => {
+			console.log('Connection failed:', error)
+			})
+			banheiroLamp.on('message', (topic, message) => {
+			console.log('receive message：', topic, message.toString());
+			if (message.toString() == 1) {
+				valueLampBanheiro = 800;
+			} else {
+				valueLampBanheiro = 0;
+			}
+			})
+
+			ruaLamp.on('connect', function () {
+				console.log('Connected')
+				ruaLamp.subscribe('my/testiculo/topic/lampadas/ruaLamp')
+			})
+			ruaLamp.on('error', (error) => {
+			console.log('Connection failed:', error)
+			})
+			ruaLamp.on('message', (topic, message) => {
+			console.log('receive message：', topic, message.toString());
+			if (message.toString() == 1) {
+				valueLampRua = 800;
+			} else {
+				valueLampRua = 0;
+			}
+			})
+
+			ambLuz.on('connect', function () {
+				console.log('Connected')
+				ambLuz.subscribe('pi/ldr')
+			})
+			ambLuz.on('error', (error) => {
+			console.log('Connection failed:', error)
+			})
+			ambLuz.on('message', (topic, message) => {
+				console.log('receive message：', topic, message.toString());
+				/* if (parseInt(message.toString()) > 1000) {
+					luzAmbiente = (parseInt(message.toString()) * 0.01);
+					valueLampRua = 0;
+					console.log('Maior que 1000 = ' + luzAmbiente)
+				}  */
+				if (parseInt(message.toString()) > 100 && parseInt(message.toString()) < 1000) {
+					luzAmbiente = parseInt(message.toString()) * 0.1;
+					valueLampRua = 0;
+					console.log('Maior que 100 = ' + luzAmbiente)
+				} 
+				if (message.toString() < 1) {
+					valueLampRua = 800;
+					luzAmbiente = parseInt(message.toString()) + 0.5;
+				}
+			})
+
+			portGarage.on('connect', function () {
+				console.log('Connected')
+				portGarage.subscribe('my/testiculo/topic/portGarage')
+			})
+			portGarage.on('error', (error) => {
+			console.log('Connection failed:', error)
+			})
+			portGarage.on('message', (topic, message) => {
+				console.log('receive message：', topic, message.toString());
+				if (message.toString() == 1){
+					startOpen()
+				} 
+				else {
+					startClose()
+				}
+			})
+
+			/* ------------------------------------------------------------------------------------------------------------ */
+			let hour = 0;
+			let minute = 0;
+			let second = 0;
+			let millisecond = 0;
+
+			let cronOpen, cronClose;
+			document.getElementById("liga-garagem").onclick = function() {startOpen()};
+			document.getElementById("desliga-garagem").onclick = function() {startClose()};
+
+			function startOpen() {
+				pauseOpen();
+				cronOpen = setInterval(() => { 
+					rotaçãoGaragem = rotaçãoGaragem + 0.01;
+					posicaoPortaGaragem = posicaoPortaGaragem + 0.008;
+					if (rotaçãoGaragem > 1.6 ) {
+						pauseOpen();
+					}
+				}, 10);
+			}
+			function startClose() {
+				pauseClose();
+				cronClose = setInterval(() => { 
+					rotaçãoGaragem = rotaçãoGaragem - 0.01;
+					posicaoPortaGaragem = posicaoPortaGaragem - 0.008;
+					if (rotaçãoGaragem < 0 ) {
+						pauseClose();
+					}
+				}, 10);
 			}
 
-		}
-
-		function extractQuery() {
-
-			const search = window.location.search;
-
-			if ( search.indexOf( '?q=' ) !== - 1 ) {
-
-				return decodeURI( search.slice( 3 ) );
-
+			function pauseOpen() {
+				clearInterval(cronOpen);
+			}
+			function pauseClose() {
+				clearInterval(cronClose);
 			}
 
-			return '';
+			/* function reset() {
+			hour = 0;
+			minute = 0;
+			second = 0;
+			millisecond = 0;
+			document.getElementById('hour').innerText = '00';
+			document.getElementById('minute').innerText = '00';
+			document.getElementById('second').innerText = '00';
+			document.getElementById('millisecond').innerText = '000';
+			}
 
-		}
+			function timer() {
+			if ((millisecond += 10) == 1000) {
+				millisecond = 0;
+				second++;
+			}
+			if (second == 60) {
+				second = 0;
+				minute++;
+			}
+			if (minute == 60) {
+				minute = 0;
+				hour++;
+			}
+			document.getElementById('hour').innerText = returnData(hour);
+			document.getElementById('minute').innerText = returnData(minute);
+			document.getElementById('second').innerText = returnData(second);
+			document.getElementById('millisecond').innerText = returnData(millisecond);
+			}
 
-		function createElementFromHTML( htmlString ) {
-
-			const div = document.createElement( 'div' );
-			div.innerHTML = htmlString.trim();
-			return div.firstChild;
-
-		}
+			function returnData(input) {
+			return input >= 10 ? input : `0${input}`
+			} */
 
 		</script>
-		<template id="PlaceholderHTML">
-			<!DOCTYPE html>
-				<html lang="en">
-					<head>
-						<meta charset="utf-8">
-						<title>three.js examples</title>
-						<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
-						<link rel="stylesheet" type="text/css" href="../files/main.css">
-						<style>
-						html, body {
-							height: 100%;
-						}
-						body {
-							height: 100%;
-							display: flex;
-							align-items: center;
-							justify-content: center;
-							user-select: none;
-						}
-						</style>
-					</head>
-					<body>
-						Select an example from the sidebar
-					</body>
-				</html>
-		</template>
 	</body>
 </html>

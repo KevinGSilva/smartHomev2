@@ -33,12 +33,17 @@
 
 			import { OrbitControls } from './jsm/controls/OrbitControls.js';
 
+			import { GLTFLoader } from './jsm/loaders/GLTFLoader.js'
+
+			import { OBJLoader } from './jsm/loaders/OBJLoader.js'
+
 			let camera, scene, renderer, bulbLight, bulbMat, hemiLight;
 			let ballMat, cubeMat, floorMat;
             let textura,materialParede,materialPiso, geometriaParede, geometriaPiso;
 
 			let previousShadowMap = false;
 
+			
 
 			// ref for lumens: http://www.power-sure.com/lumens.htm
 			const bulbLuminousPowers = {
@@ -71,7 +76,7 @@
 				shadows: true,
 				exposure: 0.68,
 				bulbPower: Object.keys( bulbLuminousPowers )[ 4 ],
-				hemiIrradiance: Object.keys( hemiLuminousIrradiances )[ 0 ]
+				hemiIrradiance: Object.keys( hemiLuminousIrradiances )[ 3 ]
 			};
 
 			init();
@@ -82,9 +87,9 @@
 				const container = document.getElementById( 'container' );
 
 				camera = new THREE.PerspectiveCamera( 50, window.innerWidth / window.innerHeight, 0.1, 100 );
-				camera.position.x = - 10;
-				camera.position.z = 8;
-				camera.position.y = 4;
+				camera.position.x = 10;
+				camera.position.z = 0;
+				camera.position.y = 5;
 
 				scene = new THREE.Scene();
 				scene.background = new THREE.Color( 0x8cc7de );
@@ -154,7 +159,7 @@
 					bumpScale: 0.002,
 					metalness: 0.2
 				} );
-				textureLoader.load( "textures/brick_diffuse.jpg", function ( map ) {
+				textureLoader.load( "textures/Madeira-Eucalipto.jpg", function ( map ) {
 
 					map.wrapS = THREE.RepeatWrapping;
 					map.wrapT = THREE.RepeatWrapping;
@@ -182,7 +187,9 @@
 				} );
 
                 criaParede(5,3,0.15,4.85,1.5,2.40,1,1,1,0,0,0,cubeMat);
-                criaParede(0.15,3,5,7.5,1.5,0.0,1,1,1,0,0,0,cubeMat);
+                criaParede(0.15,3,5,7.42,1.5,0.0,1,1,1,0,0,0,cubeMat);
+				
+				/* (espessura, altura, estender, posicaoX, posicaoY, posicaoZ, espessura, altura, estender, rotaçãoZ, rotaçãoX, rotaçãoY) */
                 criaParede(0.15,3,5,-7.5,1.5,0.0,1,1,1,0,0,0,cubeMat);				
 
 				ballMat = new THREE.MeshStandardMaterial( {
@@ -214,6 +221,45 @@
 				scene.add( floorMesh );
 
 				const boxGeometry = new THREE.BoxGeometry( 0.5, 0.5, 0.5 );
+
+				const loader = new GLTFLoader().setPath('models/w_lumion/');
+				loader.load('scene.gltf', function ( gltf ) {
+					gltf.scene.position.y = 5;
+					gltf.scene.position.x = 5;
+					gltf.scene.position.y = 5;
+					gltf.scene.scale.set(1000, 1000, 1000);
+					console.log(gltf);
+					scene.add(gltf.scene);
+					render(gltf.scene);
+				});
+
+				// instantiate a loader
+				const loaderr = new OBJLoader();
+				// load a resource
+				loaderr.load(
+					// resource URL
+					'models/abajur/LUMION.obj',
+					// called when resource is loaded
+					function ( object ) {
+						object.position.y = 5;
+						object.scale.setScalar(5);
+						console.log(object);
+						scene.add( object );
+
+					},
+					// called when loading is in progresses
+					function ( xhr ) {
+
+						console.log( ( xhr.loaded / xhr.total * 100 ) + '% loaded' );
+
+					},
+					// called when loading has errors
+					function ( error ) {
+
+						console.log( 'An error happened' + error );
+
+					}
+				);
 				/*
 				const ballGeometry = new THREE.SphereGeometry( 0.25, 32, 32 );
 				const ballMesh = new THREE.Mesh( ballGeometry, ballMat );
@@ -289,7 +335,7 @@
 
             function criaParede(tx, ty, tz, px, py, pz, ex, ey, ez, rx, ry, rz,Materialx){
 
-                textura = new THREE.TextureLoader().load( 'textures/brick_diffuse.jpg' );
+                textura = new THREE.TextureLoader().load( 'textures/hardwood2_bump.jpg' );
                    
                 textura.roughness = 0.7
                 textura.color = 0xffffff,
